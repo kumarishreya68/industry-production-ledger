@@ -49,13 +49,26 @@
                 <h3>Good Output (Sensor Count)</h3>
                 <h1 id="goodCount">0</h1>
             </div>
-            <div class="card" id="rejectCard">
+            <div class="card alert-green" id="rejectCard">
                 <h3>Logged Rejects (Vision Cam)</h3>
                 <h1 id="rejectCount">0</h1>
             </div>
             <div class="card alert-green">
                 <h3>Total Line Downtime</h3>
                 <h1 id="downtimeCount">0 mins</h1>
+            </div>
+        </div>
+
+        <!-- NEW: Dynamic Horizontal Status Timeline Strip Component -->
+        <div style="background: #334155; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+            <h3 style="margin-top: 0; color: #94a3b8; font-size: 14px; text-transform: uppercase;">⚡ Live Line Operation Timeline (Sensor Pulses)</h3>
+            <div id="timelineTrack" style="display: flex; gap: 4px; background: #1e293b; padding: 10px; border-radius: 6px; min-height: 24px; overflow-x: auto; align-items: center;">
+                <!-- Status color micro-bars render here dynamically -->
+            </div>
+            <div style="display: flex; gap: 15px; margin-top: 10px; font-size: 12px;">
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#10b981; border-radius:3px;"></span> Normal Run</span>
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#f59e0b; border-radius:3px;"></span> Reject Logged</span>
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#ef4444; border-radius:3px;"></span> Halted Downtime</span>
             </div>
         </div>
 
@@ -74,7 +87,7 @@
         <hr style="margin: 40px 0; border: 1px solid #475569;">
 
         <!-- Step 5: Long-Term History Ledger View -->
-        <h3>📜 Operator Performance Ledger (PostgreSQL History)</h3>
+        <h3>📜 Operator Performance Ledger </h3>
         <table>
             <thead>
                 <tr><th>Timestamp</th><th>Operator</th><th>Output</th><th>Rejects</th><th>Downtime</th><th>Assigned Reason</th></tr>
@@ -105,13 +118,27 @@
                 document.getElementById('rejectCount').innerText = data.reject_count;
                 document.getElementById('downtimeCount').innerText = data.downtime_minutes + " mins";
                 
-                // CRUCIAL DIFFERENCE FEATURE: UI shifts colors dynamically based on sensor limits!
+                // Alarm warning limits toggles
                 const rejectCard = document.getElementById('rejectCard');
                 if (data.reject_count >= 5) {
                     rejectCard.className = "card alert-red";
                 } else {
                     rejectCard.className = "card alert-green";
                 }
+
+                // Render Timeline Micro-bars
+                const timelineTrack = document.getElementById('timelineTrack');
+                if (data.timeline && data.timeline.length > 0) {
+                    timelineTrack.innerHTML = data.timeline.map(status => {
+                        let barColor = '#10b981'; // Normal
+                        if (status === 'defect') barColor = '#f59e0b'; // Amber Warning
+                        if (status === 'downtime') barColor = '#ef4444'; // Halted Red
+                        return `<div style="flex: 1; min-width: 14px; height: 24px; background: ${barColor}; border-radius: 3px;"></div>`;
+                    }).join('');
+                } else {
+                    timelineTrack.innerHTML = `<span style="color:#64748b; font-size:13px; padding-left:5px;">Awaiting live data pulses...</span>`;
+                }
+
             } catch (err) {
                 console.log("Waiting for simulated machine node link...");
             }
@@ -119,15 +146,25 @@
 
         async function submitShift() {
             const name = document.getElementById('operatorName').value;
-            const res = await fetch('/api/verify-shift', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operator_name: name, stop_reason: chosenReason })
-            });
-            const data = await res.json();
-            if(data.success) {
-                alert("Data Verified! Row added to your long-term Postgres ledger.");
-                loadHistoryTable();
+            try {
+                const res = await fetch('/api/verify-shift', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ operator_name: name, stop_reason: chosenReason })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    alert("Data Verified! Row added to your long-term Postgres ledger.");
+                    
+                    // Reset client input UI states clean
+                    chosenReason = "Uncategorized Error";
+                    document.getElementById('currentReason').innerText = "Pending Verification...";
+                    document.querySelectorAll('.tag-btn').forEach(btn => btn.classList.remove('active'));
+                    
+                    loadHistoryTable();
+                }
+            } catch (err) {
+                alert("Error submitting shift logs.");
             }
         }
 
@@ -136,16 +173,21 @@
                 const res = await fetch('/api/history');
                 const logs = await res.json();
                 const body = document.getElementById('historyTableBody');
-                body.innerHTML = logs.map(log => `
-                    <tr>
-                        <td>${new Date(log.created_at).toLocaleTimeString()}</td>
+                body.innerHTML = logs.map(log => {
+                    let reasonColor = "#10b981"; // Safe action green
+                    if (log.stop_reason === "Uncategorized Error") {
+                        reasonColor = "#ef4444"; // Warning alert red
+                    }
+                    return `
+                        <tr>
+                            <td>${new Date(log.created_at).toLocaleTimeString()}</td>
                         <td><b>${log.operator_name}</b></td>
                         <td>${log.good_output}</td>
                         <td>${log.reject_count}</td>
                         <td>${log.downtime_minutes} mins</td>
                         <td><span style="color:#10b981;font-weight:bold;">${log.stop_reason}</span></td>
                     </tr>
-                `).join('');
+                `}).join('');
             } catch (err) {
                 console.log("Ledger query clear.");
             }
