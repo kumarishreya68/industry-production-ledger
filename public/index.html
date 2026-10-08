@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Industrial Automation - Live Validation Console</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; margin: 30px; color: #f8fafc; }
+        .container { max-width: 900px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 25px; }
+        
+        /* Interactive Live Value Cards */
+        .card { background: #334155; padding: 20px; border-radius: 8px; border-top: 6px solid #3b82f6; text-align: center; transition: background 0.3s; }
+        .card h3 { margin: 0 0 10px 0; color: #94a3b8; font-size: 14px; text-transform: uppercase; }
+        .card h1 { margin: 0; font-size: 36px; font-weight: bold; }
+        
+        /* Dynamic Alarm Colors */
+        .alert-green { border-top-color: #10b981; }
+        .alert-red { border-top-color: #ef4444; background: #451a03; animation: blink 1.5s infinite; }
+        
+        .tag-btn { background: #475569; color: white; padding: 12px 18px; border: 1px solid #64748b; border-radius: 6px; cursor: pointer; margin-right: 10px; font-weight: bold; }
+        .tag-btn:hover { background: #64748b; }
+        .tag-btn.active { background: #3b82f6; border-color: #60a5fa; }
+        
+        .submit-btn { background: #10b981; color: white; padding: 15px 30px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 15px; }
+        .submit-btn:hover { background: #059669; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #334155; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; border: 1px solid #475569; text-align: left; }
+        th { background-color: #1e293b; color: #94a3b8; }
+        
+        @keyframes blink { 50% { border-top-color: #b91c1c; } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>🤖 Robotic Line Live Validation Console</h2>
+        <p style="color: #94a3b8;">Data Source: <span style="color: #60a5fa; font-weight: bold;">⚡ Simulated PLC Sensor Feed (Active)</span></p>
+        
+        <!-- Step 1: Operator Signature -->
+        <div style="margin-bottom: 25px; background: #334155; padding: 15px; border-radius: 8px;">
+            <label><b>Active Operator Signature: </b></label>
+            <input type="text" id="operatorName" value="Alex M." style="padding: 8px; font-size: 14px; background: #1e293b; color: white; border: 1px solid #475569; border-radius: 4px;">
+        </div>
+
+        <!-- Step 2: Live Ticking Display (No Manual Input Boxes!) -->
+        <div class="grid">
+            <div class="card alert-green">
+                <h3>Good Output (Sensor Count)</h3>
+                <h1 id="goodCount">0</h1>
+            </div>
+            <div class="card" id="rejectCard">
+                <h3>Logged Rejects (Vision Cam)</h3>
+                <h1 id="rejectCount">0</h1>
+            </div>
+            <div class="card alert-green">
+                <h3>Total Line Downtime</h3>
+                <h1 id="downtimeCount">0 mins</h1>
+            </div>
+        </div>
+
+        <!-- Step 3: Action Context Tagging -->
+        <div style="background: #334155; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+            <h3 style="margin-top:0; color:#94a3b8;">Assign Human Reason for Stoppages / Rejects:</h3>
+            <p>Selected Reason Category: <b id="currentReason" style="color:#60a5fa;">Pending Verification...</b></p>
+            <button class="tag-btn" onclick="selectReason(this, 'Material Issue')">Material Issue</button>
+            <button class="tag-btn" onclick="selectReason(this, 'Machine Jam')">Machine Jam</button>
+            <button class="tag-btn" onclick="selectReason(this, 'Sensor Cleaning')">Sensor Cleaning</button>
+        </div>
+
+        <!-- Step 4: Verification Handshake -->
+        <button class="submit-btn" onclick="submitShift()">Confirm & Commit Shift Data to Ledger</button>
+
+        <hr style="margin: 40px 0; border: 1px solid #475569;">
+
+        <!-- Step 5: Long-Term History Ledger View -->
+        <h3>📜 Operator Performance Ledger (PostgreSQL History)</h3>
+        <table>
+            <thead>
+                <tr><th>Timestamp</th><th>Operator</th><th>Output</th><th>Rejects</th><th>Downtime</th><th>Assigned Reason</th></tr>
+            </thead>
+            <tbody id="historyTableBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let chosenReason = "Uncategorized Error";
+
+        function selectReason(btnElement, reason) {
+            chosenReason = reason;
+            document.getElementById('currentReason').innerText = reason;
+            
+            // Toggle visual button styles
+            document.querySelectorAll('.tag-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+        }
+
+        // Connect to our simulated Node.js PLC data stream
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/machine-data');
+                const data = await res.json();
+                
+                document.getElementById('goodCount').innerText = data.good_output.toLocaleString();
+                document.getElementById('rejectCount').innerText = data.reject_count;
+                document.getElementById('downtimeCount').innerText = data.downtime_minutes + " mins";
+                
+                // CRUCIAL DIFFERENCE FEATURE: UI shifts colors dynamically based on sensor limits!
+                const rejectCard = document.getElementById('rejectCard');
+                if (data.reject_count >= 5) {
+                    rejectCard.className = "card alert-red";
+                } else {
+                    rejectCard.className = "card alert-green";
+                }
+            } catch (err) {
+                console.log("Waiting for simulated machine node link...");
+            }
+        }, 2000);
+
+        async function submitShift() {
+            const name = document.getElementById('operatorName').value;
+            const res = await fetch('/api/verify-shift', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operator_name: name, stop_reason: chosenReason })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert("Data Verified! Row added to your long-term Postgres ledger.");
+                loadHistoryTable();
+            }
+        }
+
+        async function loadHistoryTable() {
+            try {
+                const res = await fetch('/api/history');
+                const logs = await res.json();
+                const body = document.getElementById('historyTableBody');
+                body.innerHTML = logs.map(log => `
+                    <tr>
+                        <td>${new Date(log.created_at).toLocaleTimeString()}</td>
+                        <td><b>${log.operator_name}</b></td>
+                        <td>${log.good_output}</td>
+                        <td>${log.reject_count}</td>
+                        <td>${log.downtime_minutes} mins</td>
+                        <td><span style="color:#10b981;font-weight:bold;">${log.stop_reason}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.log("Ledger query clear.");
+            }
+        }
+        loadHistoryTable();
+    </script>
+</body>
+</html>
